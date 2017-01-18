@@ -1,0 +1,235 @@
+
+
+#include <Arduino.h>
+
+
+//#define TX_DELAY 200  //Delay between send
+//#define TX_MAX_PACKETS 1000
+
+#define LED_PIN 9
+#define TRIGGER_PIN1 6      // Node 1
+#define TRIGGER_PIN2 7      // Node 2
+#define TRIGGER_RST  8      // Pin to trigger Resset
+
+#define T_SYMBOL 1024     // micro seconds
+//#define TRIGGER_DELAY1 15    // symbols
+//#define TRIGGER_DELAY2 0
+
+//#define NO_TRIGGER2   // T2 always bigger
+
+#define DEBUG
+
+
+// application entry point
+void setup() {
+
+  Serial.begin(57600);
+  Serial.setTimeout(3000);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+
+  Serial.println("Starting");
+  Serial.flush();
+
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(TRIGGER_PIN1, OUTPUT);
+  pinMode(TRIGGER_PIN2, OUTPUT);
+  pinMode(TRIGGER_RST, OUTPUT);
+
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(TRIGGER_PIN1, LOW);
+  digitalWrite(TRIGGER_PIN2, LOW);
+  digitalWrite(TRIGGER_RST, LOW);
+
+  Serial.println("Started");
+  Serial.flush();
+
+}
+
+
+void mySleep(uint32_t secs){
+  uint32_t w_secs = secs;
+  // From delayMicroseconds docs: Currently, the largest value that
+  // will produce an accurate delay is 16383.
+  while (w_secs > 16000) {
+      delay(16);
+      w_secs -= 16000 ;
+  }
+  delayMicroseconds(w_secs);
+}
+
+int myReadInt(){
+  String inString = "";    // string to hold input
+  while (true) {
+    String command = Serial.readStringUntil('\n');
+
+    if (command.length() > 0){
+      Serial.println(command.toInt());
+      Serial.println("ok");
+      return command.toInt();
+    }
+  }
+
+}
+
+void loop() {
+
+
+  uint32_t TX_DELAY = 200;  //Delay between send
+  uint32_t TX_MAX_PACKETS = 1000;
+  uint32_t TRIGGER_DELAY1 = 0;    // symbols
+  uint32_t TRIGGER_DELAY2 = 0;
+  int NO_TRIGGER2 = 0;
+
+
+
+  Serial.println("ok");
+  while (true) {
+
+    String command = Serial.readStringUntil('\n');
+
+    if (command == "E") {
+      Serial.println("ECHO");
+      Serial.println("ok");
+    }
+
+    else if (command == "D") {
+      Serial.println("TX_DELAY: ");
+      Serial.println("ok");
+      TX_DELAY = myReadInt();
+    }
+
+    else if (command == "P") {
+      Serial.println("TX_MAX_PACKETS: ");
+      Serial.println("ok");
+      TX_MAX_PACKETS = myReadInt();
+    }
+
+    else if (command == "TD1") {
+      Serial.println("TRIGGER_DELAY1: ");
+      Serial.println("ok");
+      TRIGGER_DELAY1 = myReadInt();
+    }
+
+    else if (command == "TD2") {
+      Serial.println("TRIGGER_DELAY2: ");
+      Serial.println("ok");
+      TRIGGER_DELAY2 = myReadInt();
+    }
+
+    else if (command == "NT") {
+      Serial.println("NO_TRIGGER2: ");
+      Serial.println("ok");
+      NO_TRIGGER2 = myReadInt();
+    }
+
+    else if (command == "DONE"){
+      Serial.println("DONE: ");
+      Serial.println("ok");
+      break;
+    }
+
+  }
+
+
+  uint32_t count = 0;
+
+  int first_pin = TRIGGER_PIN1;
+  int second_pin = TRIGGER_PIN2;
+  uint32_t delay_before_first = 0;
+  uint32_t delay_between_first_and_second = 0;
+
+  // Trigger1 is released first
+  if (TRIGGER_DELAY1 < TRIGGER_DELAY2){
+    delay_before_first = (uint32_t) (TRIGGER_DELAY1 * (uint32_t)T_SYMBOL);
+    delay_between_first_and_second = (uint32_t)(TRIGGER_DELAY2 - TRIGGER_DELAY1) * (uint32_t)T_SYMBOL;
+    first_pin = TRIGGER_PIN1;
+    second_pin = TRIGGER_PIN2;
+  }
+  // Triger2 is released first
+  else if (TRIGGER_DELAY1 > TRIGGER_DELAY2){
+      delay_before_first = (uint32_t) (TRIGGER_DELAY2 * (uint32_t)T_SYMBOL);
+      delay_between_first_and_second = (uint32_t)(TRIGGER_DELAY1 - TRIGGER_DELAY2) * (uint32_t)T_SYMBOL;
+      first_pin = TRIGGER_PIN2;
+      second_pin = TRIGGER_PIN1;
+  }
+
+#if defined(DEBUG)
+  Serial.print("Before Delay: ");
+  Serial.println((uint32_t)delay_before_first);
+
+  Serial.print("Trriger 1: ");
+  Serial.println(first_pin);
+
+  Serial.print("Delay: ");
+  Serial.println(delay_between_first_and_second);
+
+  Serial.print("Trriger 2: ");
+  Serial.println(second_pin);
+
+  Serial.print("NO Trriger2?: ");
+  Serial.println(NO_TRIGGER2);
+#endif /* DEBUG */
+
+
+  // Reset Nodes
+  digitalWrite(TRIGGER_RST, LOW);
+  delay(100);
+  digitalWrite(TRIGGER_RST, HIGH);
+
+  delay(3000);
+
+  while (count <= TX_MAX_PACKETS){
+
+    //digitalWrite(LED_PIN, HIGH); // LED on
+    if (delay_before_first > 0)
+      mySleep(delay_before_first); // Delay before first trigger if any
+
+    // Simultaneous
+
+    if (TRIGGER_DELAY1 == TRIGGER_DELAY2){
+      //PORTD = PORTD | B11000000; // sets digital pins 7,6 HI
+      digitalWrite(first_pin, HIGH);
+      if(!NO_TRIGGER2)
+        digitalWrite(second_pin, HIGH);
+      mySleep(1000);
+    }
+
+    // Not Simultaneous
+    else{
+
+      // Tirgger First Pin
+      digitalWrite(first_pin, HIGH);
+      mySleep(1000);
+      digitalWrite(first_pin, LOW);
+
+      if(!NO_TRIGGER2){
+        if (delay_between_first_and_second-1000 > 0)
+          mySleep(delay_between_first_and_second-1000); // Delay between
+        digitalWrite(second_pin, HIGH);
+        mySleep(1000); // trigger the interupts on the reiceivers 1ms
+      }
+
+
+    }
+
+
+    //digitalWrite(first_pin,LOW);
+    PORTD = PORTD & B00111111; // sets digital pins 7,6 LOW
+
+    delay(TX_DELAY/2);
+    //digitalWrite(LED_PIN, LOW); // led OFF
+    delay(TX_DELAY/2);
+
+    Serial.print(count++);
+    Serial.print("/");
+    Serial.println(TX_MAX_PACKETS);
+    Serial.flush();
+  }
+
+  //while (true) {
+    /* do nothing */
+  //  }
+
+}
